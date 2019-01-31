@@ -1,0 +1,155 @@
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: k8s-metric-prometheus-configmap
+data:
+  prometheus.tmpl: |-
+    global:
+      scrape_interval:     15s
+    scrape_configs:
+    - job_name: 'kubernetes-kubelet'
+      scheme: https
+      tls_config:
+        ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+        insecure_skip_verify: true
+      bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+      kubernetes_sd_configs:
+      - role: node
+      relabel_configs:
+      - action: labelmap
+        regex: __meta_kubernetes_node_label_(.+)
+      - target_label: __address__
+        replacement: kubernetes.default.svc:443
+      - source_labels: [__meta_kubernetes_node_name]
+        regex: (.+)
+        target_label: __metrics_path__
+        replacement: /api/v1/nodes/${1}/proxy/metrics
+    - job_name: 'kubernetes-cadvisor'
+      scheme: https
+      tls_config:
+        ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+        insecure_skip_verify: true
+      bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+      kubernetes_sd_configs:
+      - role: node
+      relabel_configs:
+      - action: labelmap
+        regex: __meta_kubernetes_node_label_(.+)
+      - target_label: __address__
+        replacement: kubernetes.default.svc:443
+      - source_labels: [__meta_kubernetes_node_name]
+        regex: (.+)
+        target_label: __metrics_path__
+        replacement: /api/v1/nodes/${1}/proxy/metrics/cadvisor
+    - job_name: 'kubernetes-kube-state'
+      kubernetes_sd_configs:
+      - role: pod
+      relabel_configs:
+      - action: labelmap
+        regex: __meta_kubernetes_pod_label_(.+)
+      - source_labels: [__meta_kubernetes_namespace]
+        action: replace
+        target_label: kubernetes_namespace
+      - source_labels: [__meta_kubernetes_pod_name]
+        action: replace
+        target_label: kubernetes_pod_name
+      - source_labels: [__meta_kubernetes_pod_label_grafanak8sapp]
+        regex: .*true.*
+        action: keep
+      - source_labels: ['__meta_kubernetes_pod_label_daemon', '__meta_kubernetes_pod_node_name']
+        regex: 'node-exporter;(.*)'
+        action: replace
+        target_label: nodename
+---
+kind: Service
+apiVersion: v1
+metadata:
+  name: metric-prometheus
+  labels:
+    app: metric
+    component: metric-prometheus
+spec:
+  selector:
+    app: metric
+    component: metric-prometheus
+  ports:
+    - name: http
+      port: 9090
+---
+apiVersion: apps/v1beta1
+kind: StatefulSet
+metadata:
+  name: metric-prometheus
+  labels:
+    app: metric
+    appName: metric-prometheus
+    component: metric-prometheus
+spec:
+  serviceName: metric-prometheus
+  updateStrategy:
+    type: RollingUpdate
+  replicas: 1
+  selector:
+    matchLabels:
+      app: metric
+      component: metric-prometheus
+  template:
+    metadata:
+      labels:
+        app: metric
+        component: metric-prometheus
+      annotations:
+    spec:
+      serviceAccountName: prometheus
+
+      containers:
+      - name: metric-prometheus
+        image: dashbase/prometheus:nightly
+        imagePullPolicy: Always
+        ports:
+        - name: http
+          containerPort: 9090
+        env:
+        - name: ENABLE_ALERTMANAGER
+          value: "true"
+        - name: ENABLE_KUBERNETES_SCRAPE
+          value: "true"
+        - name: ENABLE_REMOTE_READ
+          value: "true"
+        - name: REMOTE_READ_URL
+          value: "https://influxdb:8086/api/v1/prom/read?u=dashbase_reader&p=dashbase_reader&db=dashbase_prometheus"
+        - name: KUBE_POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        readinessProbe:
+          httpGet:
+            path: /-/ready
+            port: 9090
+
+
+        volumeMounts:
+        - name: prometheus-data
+          mountPath: /prometheus
+        - mountPath: /etc/prometheus/prometheus.tmpl
+          name: configmap-volume
+          subPath: prometheus.tmpl
+      volumes:
+        - configMap:
+            name: k8s-metric-prometheus-configmap
+          name: configmap-volume
+  volumeClaimTemplates:
+  - metadata:
+      name: prometheus-data
+      labels:
+        app: metric
+        component: metric-prometheus
+    spec:
+      storageClassName: dashbase-meta
+      accessModes:
+      - ReadWriteOnce
+      resources:
+        requests:
+          storage: 30Gi

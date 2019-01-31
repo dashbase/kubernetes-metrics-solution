@@ -1,0 +1,76 @@
+
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  labels:
+    app: metric-grafana
+  name: metric-grafana
+spec:
+  serviceName: metric-grafana
+  replicas: 1
+  selector:
+    matchLabels:
+      app: metric-grafana
+  template:
+    metadata:
+      labels:
+        app: metric-grafana
+      name: metric-grafana
+    spec:
+      serviceAccountName: metric-grafana
+      containers:
+        - image: grafana/grafana:latest
+          name: metric-grafana
+          env:
+            - name: GF_INSTALL_PLUGINS
+              value: grafana-kubernetes-app
+          volumeMounts:
+            - name: grafana-data
+              mountPath: /var/lib/grafana
+
+        - name: kubectl
+          image: gcr.io/cloud-builders/kubectl@sha256:1239b60476a8dd727bde2d555c1b6efef420636991f9d4d376783645100dec30
+          imagePullPolicy: IfNotPresent
+          command:
+            - kubectl
+            - proxy
+
+      initContainers:
+        - command:
+            - chmod
+          args:
+            - "0777"
+            - /var/lib/grafana
+          image: alpine
+          name: chmod-volume
+          volumeMounts:
+            - name: grafana-data
+              mountPath: /var/lib/grafana
+  volumeClaimTemplates:
+    - metadata:
+        name: grafana-data
+        labels:
+          app: metric
+          component: metric-grafana
+      spec:
+        storageClassName: dashbase-meta
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 10Gi
+---
+kind: Service
+apiVersion: v1
+metadata:
+  name: metric-grafana
+  labels:
+    app: metric
+    component: metric-grafana
+spec:
+  selector:
+    app: metric
+    component: metric-grafana
+  ports:
+    - name: http
+      port: 3000
