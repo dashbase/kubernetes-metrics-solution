@@ -1,4 +1,39 @@
-Kubernetes metric solution
+# Kubernetes metric solution
+
+
+
+# install 
+
+```
+kubectl apply -f collect
+kubectl -n metric apply -f .
+
+// if you want install it to other namespace
+// plz change [grafana-role.yaml/prometheus.yaml] namespace attr
+```
+
+
+
+
+
+### Setting Grafana
+
+1. Enable grafana-kubenetes-app plugin
+
+2. Add prometheus Datasource, host=  `http://metric-prometheus:9090` no auth,  Access:server
+
+3. Add kubenetes cluster in grafana-kube-app config page
+
+   host = `http://localhost:8001` no auth, Access:server
+   PrometheusRead: the prometheus datasource just added
+
+!!! DON'T CLICK Deploy button, JUST Click Save button
+
+
+
+
+
+
 
 
 
